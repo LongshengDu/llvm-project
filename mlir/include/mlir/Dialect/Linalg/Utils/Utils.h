@@ -95,6 +95,9 @@ GenericOp makeMemRefCopyOp(OpBuilder &b, Location loc, Value from, Value to);
 std::optional<SmallVector<ReassociationIndices>>
 getReassociationMapForFoldingUnitDims(ArrayRef<OpFoldResult> mixedSizes);
 
+/// Compare 2 linalg structured ops, return true if they have the same semantic
+bool comapreStructuredOpsSemantic(LinalgOp x, LinalgOp y);
+
 //===----------------------------------------------------------------------===//
 // Fusion / Tiling utilities
 //===----------------------------------------------------------------------===//

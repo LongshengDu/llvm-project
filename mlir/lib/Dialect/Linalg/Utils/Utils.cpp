@@ -903,5 +903,59 @@ getReassociationMapForFoldingUnitDims(ArrayRef<OpFoldResult> mixedSizes) {
   return reassociation;
 }
 
+bool comapreStructuredOpsSemantic(LinalgOp x, LinalgOp y) {
+  // All input/output/loop must be same size.
+  if (x.getNumDpsInputs() != y.getNumDpsInputs() ||
+      x.getNumDpsInits() != y.getNumDpsInits() ||
+      x.getNumLoops() != y.getNumLoops())
+    return false;
+  // All input/output operands must be same type.
+  if (!llvm::equal(x->getOperands().getTypes(), y->getOperands().getTypes()) ||
+      !llvm::equal(x->getResults().getTypes(), y->getResults().getTypes()))
+    return false;
+  // Region must be the same
+  if (!OperationEquivalence::isRegionEquivalentTo(
+          &x->getRegion(0), &y->getRegion(0),
+          OperationEquivalence::IgnoreLocations))
+    return false;
+  /// Use dim id in shape-to-loops map remapped the indexing maps and iterator
+  /// types, then compare the iterator order invariant result
+  using AttrPair =
+      std::pair<SmallVector<AffineMap>, SmallVector<utils::IteratorType>>;
+  auto remapAttrDims = [](LinalgOp op) -> AttrPair {
+    DenseMap<AffineExpr, AffineExpr> replaceMap;
+    std::map<unsigned, utils::IteratorType> iteratorMap;
+    // get shape-to-loop map
+    auto indexingMaps = op.getIndexingMapsArray();
+    auto iteratorTypes = op.getIteratorTypesArray();
+    AffineMap shapeToLoops = op.getShapesToLoopsMap();
+    // renumber the dim id based on shape-to-loop map
+    // get a replacement map and iterator types map
+    for (auto [idx, expr] : llvm::enumerate(shapeToLoops.getResults())) {
+      replaceMap[getAffineDimExpr(idx, op.getContext())] = expr;
+      iteratorMap[cast<AffineDimExpr>(expr).getPosition()] = iteratorTypes[idx];
+    }
+    // replace old dim id with new ones in indexing maps
+    // sort IteratorType to new array using ordered map
+    SmallVector<AffineMap> retMaps;
+    SmallVector<utils::IteratorType> retIters;
+    std::transform(indexingMaps.begin(), indexingMaps.end(),
+                   std::back_inserter(retMaps),
+                   [&](const AffineMap &m) { return m.replace(replaceMap); });
+    std::transform(iteratorMap.begin(), iteratorMap.end(),
+                   std::back_inserter(retIters),
+                   [](const std::pair<unsigned, utils::IteratorType> &p) {
+                     return p.second;
+                   });
+    // return the pair
+    return {retMaps, retIters};
+  };
+  AttrPair xAttrPair = remapAttrDims(x);
+  AttrPair yAttrPair = remapAttrDims(y);
+  // check equivalence
+  return llvm::equal(xAttrPair.first, yAttrPair.first) &&
+         llvm::equal(xAttrPair.second, yAttrPair.second);
+}
+
 } // namespace linalg
 } // namespace mlir
